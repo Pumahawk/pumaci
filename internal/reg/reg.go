@@ -1,6 +1,7 @@
 package reg
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,7 +34,32 @@ func (c *Client) setTk(scope, token string) {
 	c.tokens[scope] = token
 }
 
-func (c *Client) Manifest(image string) (any, error) {
+type ManifestResDto struct {
+	raw any
+}
+
+func (m *ManifestResDto) IsIndex() bool {
+	if mapv, ok := m.raw.(map[string]any); ok {
+		if mediaType, ok := mapv["mediaType"]; ok {
+			return mediaType == "application/vnd.oci.image.index.v1+json"
+		} else {
+			log.Debug("not found media type in manifest")
+		}
+	} else {
+		log.Debug("unexpected raw type")
+	}
+	return false
+}
+
+func (m *ManifestResDto) Raw() string {
+	bf := &bytes.Buffer{}
+	if err := json.NewEncoder(bf).Encode(m.raw); err != nil {
+		panic(err)
+	}
+	return bf.String()
+}
+
+func (c *Client) Manifest(image string) (*ManifestResDto, error) {
 	cl := &http.Client{}
 	img, err := ParseImage(image)
 	var resB any
@@ -69,7 +95,7 @@ func (c *Client) Manifest(image string) (any, error) {
 		log.Debug("authentication required, status_code=%d", res.StatusCode)
 		tokenize, err := c.tokenize(res.Header.Get("www-authenticate"))
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		req.Header.Add("authorization", "Bearer "+tokenize)
 
@@ -79,20 +105,20 @@ func (c *Client) Manifest(image string) (any, error) {
 		}
 		defer res2.Body.Close()
 		if res2.StatusCode < 200 || res2.StatusCode >= 300 {
-			return "", fmt.Errorf("unable to retry request, status_code=%d", res2.StatusCode)
+			return nil, fmt.Errorf("unable to retry request, status_code=%d", res2.StatusCode)
 		}
 
 		if err := json.NewDecoder(res2.Body).Decode(&resB); err != nil {
-			return "", err
+			return nil, err
 		}
 	} else if res.StatusCode >= 200 && res.StatusCode < 300 {
 		if err := json.NewDecoder(res.Body).Decode(&resB); err != nil {
-			return "", err
+			return nil, err
 		}
 	} else {
-		return "", fmt.Errorf("unexpected status_code=%d", res.StatusCode)
+		return nil, fmt.Errorf("unexpected status_code=%d", res.StatusCode)
 	}
-	return resB, nil
+	return &ManifestResDto{resB}, nil
 }
 
 func (c *Client) tokenize(wwwAuth string) (string, error) {

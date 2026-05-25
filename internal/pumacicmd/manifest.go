@@ -1,7 +1,6 @@
 package pumacicmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -23,10 +22,7 @@ var Manifest = &cmd.Cmd{
 			fmt.Fprintf(os.Stderr, "get manifest: %s\n", err)
 			os.Exit(1)
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(data); err != nil {
-			fmt.Fprintf(os.Stderr, "decode data: %s\n", err)
-			os.Exit(1)
-		}
+		fmt.Println(data.Raw())
 		return nil
 	},
 }
