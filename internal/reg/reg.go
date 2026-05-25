@@ -46,6 +46,7 @@ func (c *Client) Manifest(image string) (any, error) {
 		return nil, err
 	}
 	log.Debug("manifest raw_url=%q", rawUrl)
+
 	req, err := http.NewRequest("GET", rawUrl, nil)
 	if err != nil {
 		return nil, err
@@ -63,6 +64,7 @@ func (c *Client) Manifest(image string) (any, error) {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer res.Body.Close()
+
 	if res.StatusCode == 401 {
 		log.Debug("authentication required, status_code=%d", res.StatusCode)
 		tokenize, err := c.tokenize(res.Header.Get("www-authenticate"))
@@ -70,18 +72,25 @@ func (c *Client) Manifest(image string) (any, error) {
 			return "", err
 		}
 		req.Header.Add("authorization", "Bearer "+tokenize)
+
 		res2, err := cl.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("do request: %w", err)
 		}
 		defer res2.Body.Close()
+		if res2.StatusCode < 200 || res2.StatusCode >= 300 {
+			return "", fmt.Errorf("unable to retry request, status_code=%d", res2.StatusCode)
+		}
+
 		if err := json.NewDecoder(res2.Body).Decode(&resB); err != nil {
 			return "", err
 		}
-	} else {
+	} else if res.StatusCode >= 200 && res.StatusCode < 300 {
 		if err := json.NewDecoder(res.Body).Decode(&resB); err != nil {
 			return "", err
 		}
+	} else {
+		return "", fmt.Errorf("unexpected status_code=%d", res.StatusCode)
 	}
 	return resB, nil
 }
