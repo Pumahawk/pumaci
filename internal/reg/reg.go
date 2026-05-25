@@ -53,7 +53,9 @@ func (m *ManifestResDto) IsIndex() bool {
 
 func (m *ManifestResDto) Raw() string {
 	bf := &bytes.Buffer{}
-	if err := json.NewEncoder(bf).Encode(m.raw); err != nil {
+	jd := json.NewEncoder(bf)
+	jd.SetIndent("", "  ")
+	if err := jd.Encode(m.raw); err != nil {
 		panic(err)
 	}
 	return bf.String()
