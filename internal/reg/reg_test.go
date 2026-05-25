@@ -34,21 +34,27 @@ func TestGetBaseUrl(t *testing.T) {
 			image:   "customrepo:4567/project/alpine",
 			tag:     "latest",
 		},
+		{
+			imageIn: "customrepo:4567/project/alpine:1.2.3",
+			url:     "https://customrepo:4567/v2",
+			image:   "customrepo:4567/project/alpine",
+			tag:     "1.2.3",
+		},
 	}
 	for _, i := range in {
-		bu, err := getBaseUrl(i.imageIn)
+		bu, err := ParseImage(i.imageIn)
 		if err != nil {
 			t.Errorf("error getBaseUrl: %s", err)
 			continue
 		}
-		if i.tag != bu.tag {
-			t.Errorf("tags: expected=%q actual %q", i.tag, bu.tag)
+		if i.tag != bu.Tag {
+			t.Errorf("tags: expected=%q actual %q", i.tag, bu.Tag)
 		}
-		if i.image != bu.image {
-			t.Errorf("image: expected=%q actual %q", i.image, bu.image)
+		if i.image != bu.Image {
+			t.Errorf("image: expected=%q actual %q", i.image, bu.Image)
 		}
-		if i.url != bu.base {
-			t.Errorf("url: expected=%q actual=%q", i.url, bu.base)
+		if i.url != bu.Url {
+			t.Errorf("url: expected=%q actual=%q", i.url, bu.Url)
 		}
 	}
 }

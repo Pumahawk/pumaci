@@ -11,13 +11,13 @@ type Client struct {
 func (c *Client) Manifest(image string) {
 }
 
-type baseUrl struct {
-	base  string
-	image string
-	tag   string
+type Image struct {
+	Url   string
+	Image string
+	Tag   string
 }
 
-func getBaseUrl(image string) (*baseUrl, error) {
+func ParseImage(image string) (*Image, error) {
 	var imageName, imageTag string
 	pt := strings.Split(image, "/")
 	u := &url.URL{}
@@ -47,9 +47,9 @@ func getBaseUrl(image string) (*baseUrl, error) {
 		u.Scheme = "https"
 	}
 	u.Path = "v2"
-	return &baseUrl{
-		base:  u.String(),
-		image: imageName,
-		tag:   imageTag,
+	return &Image{
+		Url:   u.String(),
+		Image: imageName,
+		Tag:   imageTag,
 	}, nil
 }
