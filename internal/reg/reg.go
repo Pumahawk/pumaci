@@ -61,15 +61,74 @@ func (m *ManifestResDto) Raw() string {
 	return bf.String()
 }
 
-func (c *Client) Manifest(image string) (*ManifestResDto, error) {
+func (m *ManifestResDto) LookupPlatform(marc, mos string) (string, bool) {
+	if mapv, ok := m.raw.(map[string]any); ok {
+		if manifestsRaw, ok := mapv["manifests"]; ok {
+			if manifests, ok := manifestsRaw.([]any); ok {
+				for i, mnR := range manifests {
+					var cmarc, cmos string
+					if mn, ok := mnR.(map[string]any); ok {
+						if plR, ok := mn["platform"]; ok {
+							if pl, ok := plR.(map[string]any); ok {
+								if marcR, ok := pl["architecture"]; ok {
+									if cmarc, ok = marcR.(string); !ok {
+										log.Warn("invalid type manifest.manifests[%d].platform.architecture, expected string", i)
+									}
+								} else {
+									log.Warn("missing manifest.manifests[%d].platform.architecture", i)
+								}
+								if mosR, ok := pl["os"]; ok {
+									if cmos, ok = mosR.(string); !ok {
+										log.Warn("invalid type manifest.manifests[%d].platform.os, expected string", i)
+									}
+								} else {
+									log.Warn("missing manifest.manifests[%d].platform.os", i)
+								}
+							} else {
+								log.Warn("invalid type manifest.manifests[%d].platform, expected map[any]", i)
+							}
+							if cmarc == marc && cmos == mos {
+								if digestR, ok := mn["digest"]; ok {
+									if digest, ok := digestR.(string); ok {
+										log.Debug("find manifest arc=%q os=%q digest=%q", marc, mos, digest)
+										return digest, true
+									} else {
+										log.Warn("invalid type manifest[%d].digest, expected string", i)
+									}
+								} else {
+									log.Warn("missing digest in manifests[%d]", i)
+								}
+							}
+						} else {
+							log.Warn("not found manifest.manifests[%d].platform", i)
+						}
+					} else {
+						log.Warn("unexpected type manifest.manifests[%d]", i)
+					}
+
+				}
+			} else {
+				log.Warn("unexpected type manifest.manifests[]")
+			}
+		} else {
+			log.Warn("manifests property not present")
+		}
+	} else {
+		log.Warn("unmatch type manifest")
+	}
+	return "", false
+}
+
+func (c *Client) Manifest(img *Image, digest string) (*ManifestResDto, error) {
 	cl := &http.Client{}
-	img, err := ParseImage(image)
 	var resB any
-	if err != nil {
-		return nil, fmt.Errorf("parse image %q: %w", image, err)
+
+	if digest == "" {
+		log.Debug("digest is empty, tag=%q", img.Tag)
+		digest = img.Tag
 	}
 
-	rawUrl, err := url.JoinPath(img.Url, img.Path, "manifests", img.Tag)
+	rawUrl, err := url.JoinPath(img.Url, img.Path, "manifests", digest)
 	if err != nil {
 		return nil, err
 	}

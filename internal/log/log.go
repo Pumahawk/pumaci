@@ -21,3 +21,7 @@ func Debug(f string, v ...any) {
 		log.Printf(f, v...)
 	}
 }
+
+func Warn(f string, v ...any) {
+	log.Printf(f, v...)
+}
