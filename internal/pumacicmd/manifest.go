@@ -50,12 +50,11 @@ var Manifest = &cmd.Cmd{
 			log.Debug("is index=%v", isIndex)
 			if isIndex && !showIndex {
 				if digest, ok := data.LookupPlatform(march, mos); ok {
-					data, err := cl.Manifest(img, digest)
+					data, err = cl.Manifest(img, digest)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "unable to get manifest from index: %s\n", err)
 						os.Exit(1)
 					}
-					fmt.Println(data.Raw())
 				} else {
 					fmt.Fprintf(os.Stderr, "not found manifest arch=%q os=%q\n", march, mos)
 				}

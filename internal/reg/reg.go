@@ -262,12 +262,16 @@ func (c *Client) newRequest(img *Image, tokenMethod string, method string, url s
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("accept", "*/*")
+
 	scope := getScopeFromImage(img, tokenMethod)
 	log.Debug("lookup tk scope=%q", scope)
 	if tk := c.getTk(scope); tk != "" {
 		log.Debug("find stored token scope=%q", scope)
 		req.Header.Add("authorization", "Bearer "+tk)
 	}
+
 	return req, nil
 }
 

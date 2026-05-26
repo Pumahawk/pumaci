@@ -11,7 +11,7 @@ type Commands struct {
 }
 
 func (c *Commands) Name() string {
-	return c.Name()
+	return c.CName
 }
 
 func (c *Commands) Run(args []string) error {
