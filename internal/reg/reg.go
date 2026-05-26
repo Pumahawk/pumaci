@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -59,6 +60,29 @@ func (m *ManifestResDto) Raw() string {
 		panic(err)
 	}
 	return bf.String()
+}
+
+func (m *ManifestResDto) Config() (string, bool) {
+	if mapv, ok := m.raw.(map[string]any); ok {
+		if configR, ok := mapv["config"]; ok {
+			if config, ok := configR.(map[string]any); ok {
+				if dgsR, ok := config["digest"]; ok {
+					if dgs, ok := dgsR.(string); ok {
+						return dgs, true
+					}
+				} else {
+					log.Warn("not found .config.digest")
+				}
+			} else {
+				log.Warn("unexpected type .config")
+			}
+		} else {
+			log.Warn("not found config in manifest")
+		}
+	} else {
+		log.Warn("unexpected raw type")
+	}
+	return "", false
 }
 
 func (m *ManifestResDto) LookupPlatform(marc, mos string) (string, bool) {
@@ -120,7 +144,6 @@ func (m *ManifestResDto) LookupPlatform(marc, mos string) (string, bool) {
 }
 
 func (c *Client) Manifest(img *Image, digest string) (*ManifestResDto, error) {
-	cl := &http.Client{}
 	var resB any
 
 	if digest == "" {
@@ -134,52 +157,43 @@ func (c *Client) Manifest(img *Image, digest string) (*ManifestResDto, error) {
 	}
 	log.Debug("manifest raw_url=%q", rawUrl)
 
-	req, err := http.NewRequest("GET", rawUrl, nil)
-	if err != nil {
-		return nil, err
-	}
+	req, err := c.newRequest(img, "pull", "GET", rawUrl, nil)
 
-	scope := getScopeFromImage(img, "pull")
-	log.Debug("lookup tk scope=%q", scope)
-	if tk := c.getTk(scope); tk != "" {
-		log.Debug("find stored token scope=%q", scope)
-		req.Header.Add("authorization", "Bearer "+tk)
-	}
-
-	res, err := cl.Do(req)
+	res, err := c.doRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer res.Body.Close()
-
-	if res.StatusCode == 401 {
-		log.Debug("authentication required, status_code=%d", res.StatusCode)
-		tokenize, err := c.tokenize(res.Header.Get("www-authenticate"))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Add("authorization", "Bearer "+tokenize)
-
-		res2, err := cl.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("do request: %w", err)
-		}
-		defer res2.Body.Close()
-		if res2.StatusCode < 200 || res2.StatusCode >= 300 {
-			return nil, fmt.Errorf("unable to retry request, status_code=%d", res2.StatusCode)
-		}
-
-		if err := json.NewDecoder(res2.Body).Decode(&resB); err != nil {
-			return nil, err
-		}
-	} else if res.StatusCode >= 200 && res.StatusCode < 300 {
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		if err := json.NewDecoder(res.Body).Decode(&resB); err != nil {
 			return nil, err
 		}
 	} else {
 		return nil, fmt.Errorf("unexpected status_code=%d", res.StatusCode)
 	}
+
 	return &ManifestResDto{resB}, nil
+}
+
+func (c *Client) Blob(img *Image, digest string) (io.ReadCloser, error) {
+	rawUrl, err := url.JoinPath(img.Url, img.Path, "blobs", digest)
+	if err != nil {
+		return nil, err
+	}
+	log.Debug("blob raw_url=%q", rawUrl)
+
+	req, err := c.newRequest(img, "pull", "GET", rawUrl, nil)
+
+	res, err := c.doRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		return res.Body, nil
+	} else {
+		defer res.Body.Close()
+		return nil, fmt.Errorf("unexpected status_code=%d", res.StatusCode)
+	}
 }
 
 func (c *Client) tokenize(wwwAuth string) (string, error) {
@@ -241,6 +255,49 @@ func (c *Client) tokenize(wwwAuth string) (string, error) {
 	}
 	c.setTk(scope, dto.Token)
 	return dto.Token, nil
+}
+
+func (c *Client) newRequest(img *Image, tokenMethod string, method string, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	scope := getScopeFromImage(img, tokenMethod)
+	log.Debug("lookup tk scope=%q", scope)
+	if tk := c.getTk(scope); tk != "" {
+		log.Debug("find stored token scope=%q", scope)
+		req.Header.Add("authorization", "Bearer "+tk)
+	}
+	return req, nil
+}
+
+func (c *Client) doRequest(req *http.Request) (*http.Response, error) {
+	cl := &http.Client{}
+	res, err := cl.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	if res.StatusCode == 401 {
+		defer res.Body.Close()
+		log.Debug("authentication required, status_code=%d", res.StatusCode)
+		tokenize, err := c.tokenize(res.Header.Get("www-authenticate"))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Add("authorization", "Bearer "+tokenize)
+
+		res2, err := cl.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("do request: %w", err)
+		}
+		if res2.StatusCode < 200 || res2.StatusCode >= 300 {
+			defer res2.Body.Close()
+			return nil, fmt.Errorf("unable to retry request, status_code=%d", res2.StatusCode)
+		}
+		return res2, nil
+	} else {
+		return res, nil
+	}
 }
 
 type Image struct {

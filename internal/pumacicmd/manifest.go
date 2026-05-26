@@ -1,8 +1,10 @@
 package pumacicmd
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Pumahawk/pumaci/internal/cmd"
@@ -26,34 +28,75 @@ var Manifest = &cmd.Cmd{
 			fmt.Fprintf(os.Stderr, "missing image arg\n")
 			os.Exit(1)
 		}
+
+		digest := fs.Arg(1)
+
 		cl := &reg.Client{}
 		img, err := reg.ParseImage(image)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "parse image %q: %w\n", image, err)
 			os.Exit(1)
 		}
-		data, err := cl.Manifest(img, "")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "get manifest: %s\n", err)
-			os.Exit(1)
-		}
 
-		isIndex := data.IsIndex()
-		log.Debug("is index=%v", isIndex)
-		if isIndex && !showIndex {
-			if digest, ok := data.LookupPlatform(march, mos); ok {
-				data, err := cl.Manifest(img, digest)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "unable to get manifest from index: %s\n", err)
+		if digest == "" || digest == "config" {
+			log.Debug("retrieve metadata digest=%q", digest)
+			data, err := cl.Manifest(img, "")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "get manifest: %s\n", err)
+				os.Exit(1)
+			}
+
+			isIndex := data.IsIndex()
+			log.Debug("is index=%v", isIndex)
+			if isIndex && !showIndex {
+				if digest, ok := data.LookupPlatform(march, mos); ok {
+					data, err := cl.Manifest(img, digest)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "unable to get manifest from index: %s\n", err)
+						os.Exit(1)
+					}
+					fmt.Println(data.Raw())
+				} else {
+					fmt.Fprintf(os.Stderr, "not found manifest arch=%q os=%q\n", march, mos)
+				}
+			}
+			if digest == "config" {
+				log.Debug("get config blob")
+				if dcg, ok := data.Config(); ok {
+					blob, err := cl.Blob(img, dcg)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "unable to retrieve blob digest=%q: %s\n", dcg, err)
+						os.Exit(1)
+					}
+					defer blob.Close()
+					var jsonMap any
+					// TODO check error
+					json.NewDecoder(blob).Decode(&jsonMap)
+					jen := json.NewEncoder(os.Stdout)
+					jen.SetIndent("", " ")
+					if err := jen.Encode(jsonMap); err != nil {
+						fmt.Fprintf(os.Stderr, "unable to write blob to stdout: %w\n", err)
+					}
+				} else {
+					fmt.Fprintf(os.Stderr, "digest config not found\n")
 					os.Exit(1)
 				}
-				fmt.Println(data.Raw())
 			} else {
-				fmt.Fprintf(os.Stderr, "not found manifest arch=%q os=%q\n", march, mos)
+				fmt.Println(data.Raw())
 			}
+			return nil
 		} else {
-			fmt.Println(data.Raw())
+			log.Debug("retrieve blob digest=%q", digest)
+			blob, err := cl.Blob(img, digest)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "unable to retrieve blob digest=%q: %s\n", digest, err)
+				os.Exit(1)
+			}
+			defer blob.Close()
+			if _, err := io.Copy(os.Stdout, blob); err != nil {
+				fmt.Fprintf(os.Stderr, "unable to write blob to stdout: %w\n", err)
+			}
+			return nil
 		}
-		return nil
 	},
 }
