@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Pumahawk/pumaci/internal/cmd"
 	"github.com/Pumahawk/pumaci/internal/log"
@@ -38,7 +40,7 @@ var Manifest = &cmd.Cmd{
 			os.Exit(1)
 		}
 
-		if digest == "" || digest == "config" {
+		if digest == "" || digest == "config" || strings.HasPrefix(digest, "layer:") {
 			log.Debug("retrieve metadata digest=%q", digest)
 			data, err := cl.Manifest(img, "")
 			if err != nil {
@@ -59,7 +61,40 @@ var Manifest = &cmd.Cmd{
 					fmt.Fprintf(os.Stderr, "not found manifest arch=%q os=%q\n", march, mos)
 				}
 			}
-			if digest == "config" {
+			if layer, ok := strings.CutPrefix(digest, "layer:"); ok {
+				log.Debug("get blob layer=%q", layer)
+				n, err := strconv.ParseInt(layer, 10, 64)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "unable to parse layer=%q: %s\n", layer, err)
+					os.Exit(1)
+				}
+				ls, err := data.Layers()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "unable to extract layers from manifest: %s\n", err)
+					os.Exit(1)
+				}
+				if len(ls) == 0 {
+					fmt.Fprintf(os.Stderr, "not found layers from manigest\n")
+					os.Exit(1)
+				}
+				idx := int(n) % len(ls)
+				if idx < 0 {
+					idx = len(ls) + idx
+				}
+				log.Debug("find digest (%d/%d)", idx+1, len(ls))
+				digest := ls[idx]
+				log.Debug("retrieve blob digest=%q", digest)
+				blob, err := cl.Blob(img, digest)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "unable to retrieve blob digest=%q: %s\n", digest, err)
+					os.Exit(1)
+				}
+				defer blob.Close()
+				if _, err := io.Copy(os.Stdout, blob); err != nil {
+					fmt.Fprintf(os.Stderr, "unable to write blob to stdout: %w\n", err)
+				}
+				return nil
+			} else if digest == "config" {
 				log.Debug("get config blob")
 				if dcg, ok := data.Config(); ok {
 					blob, err := cl.Blob(img, dcg)

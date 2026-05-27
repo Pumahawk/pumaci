@@ -52,6 +52,34 @@ func (m *ManifestResDto) IsIndex() bool {
 	return false
 }
 
+func (m *ManifestResDto) Layers() ([]string, error) {
+	var layers []string
+	if mapv, ok := m.raw.(map[string]any); ok {
+		if layersR, ok := mapv["layers"]; ok {
+			if layersSlice, ok := layersR.([]any); ok {
+				for i, lr := range layersSlice {
+					if l, ok := lr.(map[string]any); ok {
+						if digest, ok := l["digest"].(string); ok {
+							layers = append(layers, digest)
+						} else {
+							return nil, fmt.Errorf("unexpected type layer.%d.digest", i)
+						}
+					} else {
+						return nil, fmt.Errorf("invalid type layer=%T", lr)
+					}
+				}
+			} else {
+				return nil, fmt.Errorf("unexpected type layers type=%T", layersR)
+			}
+		} else {
+			return nil, fmt.Errorf("not found layers in manifest")
+		}
+	} else {
+		log.Debug("unexpected raw type")
+	}
+	return layers, nil
+}
+
 func (m *ManifestResDto) Raw() string {
 	bf := &bytes.Buffer{}
 	jd := json.NewEncoder(bf)
