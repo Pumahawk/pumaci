@@ -77,9 +77,13 @@ var Manifest = &cmd.Cmd{
 					fmt.Fprintf(os.Stderr, "not found layers from manigest\n")
 					os.Exit(1)
 				}
-				idx := int(n) % len(ls)
+				idx := int(n)
 				if idx < 0 {
 					idx = len(ls) + idx
+				}
+				if idx < 0 || idx >= len(ls) {
+					fmt.Fprintf(os.Stderr, "invalid defined layer index (%d/%d)", idx+1, len(ls))
+					os.Exit(1)
 				}
 				log.Debug("find digest (%d/%d)", idx+1, len(ls))
 				digest := ls[idx]
