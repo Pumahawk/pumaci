@@ -291,7 +291,7 @@ func (c *Client) newRequest(img *Image, tokenMethod string, method string, url s
 		return nil, err
 	}
 
-	req.Header.Add("accept", "*/*")
+	req.Header.Add("accept", "application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json")
 
 	scope := getScopeFromImage(img, tokenMethod)
 	log.Debug("lookup tk scope=%q", scope)
@@ -365,9 +365,12 @@ func ParseImage(image string) (*Image, error) {
 		imageTag = "latest"
 	}
 
-	if u.Scheme == "" {
+	if strings.HasPrefix(u.Host, "localhost:") || strings.HasPrefix(u.Host, "localhost/") {
+		u.Scheme = "http"
+	} else {
 		u.Scheme = "https"
 	}
+
 	u.Path = "v2"
 	return &Image{
 		Url:   u.String(),
