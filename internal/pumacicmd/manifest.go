@@ -48,17 +48,24 @@ var Manifest = &cmd.Cmd{
 				os.Exit(1)
 			}
 
-			isIndex := data.IsIndex()
-			log.Debug("is index=%v", isIndex)
-			if isIndex && !showIndex {
-				if digest, ok := data.LookupPlatform(march, mos); ok {
-					data, err = cl.Manifest(img, digest)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "unable to get manifest from index: %s\n", err)
-						os.Exit(1)
+			if index, ok := data.Index(); ok && !showIndex {
+				finded := false
+				log.Debug("manifest is index")
+				for i, m := range index.Manifests {
+					if m.Platform.Os == mos && m.Platform.Architecture == march {
+						finded = true
+						log.Debug("find manifest i=%d", i)
+						data, err = cl.Manifest(img, m.Digest)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "unable to get manifest from index digest=%q: %s\n", m.Digest, err)
+							os.Exit(1)
+						}
+						break
 					}
-				} else {
+				}
+				if !finded {
 					fmt.Fprintf(os.Stderr, "not found manifest arch=%q os=%q\n", march, mos)
+					os.Exit(1)
 				}
 			}
 			if layer, ok := strings.CutPrefix(digest, "layer:"); ok {
@@ -68,25 +75,25 @@ var Manifest = &cmd.Cmd{
 					fmt.Fprintf(os.Stderr, "unable to parse layer=%q: %s\n", layer, err)
 					os.Exit(1)
 				}
-				ls, err := data.Layers()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "unable to extract layers from manifest: %s\n", err)
+				imgm, ok := data.Image()
+				if !ok {
+					fmt.Fprintf(os.Stderr, "unexpected data type. %T\n", data)
 					os.Exit(1)
 				}
-				if len(ls) == 0 {
+				if len(imgm.Layers) == 0 {
 					fmt.Fprintf(os.Stderr, "not found layers from manigest\n")
 					os.Exit(1)
 				}
 				idx := int(n)
 				if idx < 0 {
-					idx = len(ls) + idx
+					idx = len(imgm.Layers) + idx
 				}
-				if idx < 0 || idx >= len(ls) {
-					fmt.Fprintf(os.Stderr, "invalid defined layer index (%d/%d)", idx+1, len(ls))
+				if idx < 0 || idx >= len(imgm.Layers) {
+					fmt.Fprintf(os.Stderr, "invalid defined layer index (%d/%d)", idx+1, len(imgm.Layers))
 					os.Exit(1)
 				}
-				log.Debug("find digest (%d/%d)", idx+1, len(ls))
-				digest := ls[idx]
+				log.Debug("find digest (%d/%d)", idx+1, len(imgm.Layers))
+				digest := imgm.Layers[idx].Digest
 				log.Debug("retrieve blob digest=%q", digest)
 				blob, err := cl.Blob(img, digest)
 				if err != nil {
@@ -99,28 +106,28 @@ var Manifest = &cmd.Cmd{
 				}
 				return nil
 			} else if digest == "config" {
-				log.Debug("get config blob")
-				if dcg, ok := data.Config(); ok {
-					blob, err := cl.Blob(img, dcg)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "unable to retrieve blob digest=%q: %s\n", dcg, err)
-						os.Exit(1)
-					}
-					defer blob.Close()
-					var jsonMap any
-					// TODO check error
-					json.NewDecoder(blob).Decode(&jsonMap)
-					jen := json.NewEncoder(os.Stdout)
-					jen.SetIndent("", " ")
-					if err := jen.Encode(jsonMap); err != nil {
-						fmt.Fprintf(os.Stderr, "unable to write blob to stdout: %w\n", err)
-					}
-				} else {
-					fmt.Fprintf(os.Stderr, "digest config not found\n")
+				imgm, ok := data.Image()
+				if !ok {
+					fmt.Fprintf(os.Stderr, "unexpected data type. %T\n", data)
 					os.Exit(1)
 				}
+				log.Debug("get config blob")
+				blob, err := cl.Blob(img, imgm.Config.Digest)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "unable to retrieve blob digest=%q: %s\n", imgm.Config.Digest, err)
+					os.Exit(1)
+				}
+				defer blob.Close()
+				var jsonMap any
+				// TODO check error
+				json.NewDecoder(blob).Decode(&jsonMap)
+				jen := json.NewEncoder(os.Stdout)
+				jen.SetIndent("", " ")
+				if err := jen.Encode(jsonMap); err != nil {
+					fmt.Fprintf(os.Stderr, "unable to write blob to stdout: %w\n", err)
+				}
 			} else {
-				fmt.Println(data.Raw())
+				data.Encode(os.Stdout)
 			}
 			return nil
 		} else {

@@ -1,7 +1,6 @@
 package reg
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,11 @@ import (
 	"sync"
 
 	"github.com/Pumahawk/pumaci/internal/log"
+)
+
+const (
+	IndexManifestContentType = "application/vnd.oci.image.index.v1+json"
+	ImageManifestContentType = "application/vnd.oci.image.manifest.v1+json"
 )
 
 type Client struct {
@@ -35,144 +39,7 @@ func (c *Client) setTk(scope, token string) {
 	c.tokens[scope] = token
 }
 
-type ManifestResDto struct {
-	raw any
-}
-
-func (m *ManifestResDto) IsIndex() bool {
-	if mapv, ok := m.raw.(map[string]any); ok {
-		if mediaType, ok := mapv["mediaType"]; ok {
-			return mediaType == "application/vnd.oci.image.index.v1+json"
-		} else {
-			log.Debug("not found media type in manifest")
-		}
-	} else {
-		log.Debug("unexpected raw type")
-	}
-	return false
-}
-
-func (m *ManifestResDto) Layers() ([]string, error) {
-	var layers []string
-	if mapv, ok := m.raw.(map[string]any); ok {
-		if layersR, ok := mapv["layers"]; ok {
-			if layersSlice, ok := layersR.([]any); ok {
-				for i, lr := range layersSlice {
-					if l, ok := lr.(map[string]any); ok {
-						if digest, ok := l["digest"].(string); ok {
-							layers = append(layers, digest)
-						} else {
-							return nil, fmt.Errorf("unexpected type layer.%d.digest", i)
-						}
-					} else {
-						return nil, fmt.Errorf("invalid type layer=%T", lr)
-					}
-				}
-			} else {
-				return nil, fmt.Errorf("unexpected type layers type=%T", layersR)
-			}
-		} else {
-			return nil, fmt.Errorf("not found layers in manifest")
-		}
-	} else {
-		log.Debug("unexpected raw type")
-	}
-	return layers, nil
-}
-
-func (m *ManifestResDto) Raw() string {
-	bf := &bytes.Buffer{}
-	jd := json.NewEncoder(bf)
-	jd.SetIndent("", "  ")
-	if err := jd.Encode(m.raw); err != nil {
-		panic(err)
-	}
-	return bf.String()
-}
-
-func (m *ManifestResDto) Config() (string, bool) {
-	if mapv, ok := m.raw.(map[string]any); ok {
-		if configR, ok := mapv["config"]; ok {
-			if config, ok := configR.(map[string]any); ok {
-				if dgsR, ok := config["digest"]; ok {
-					if dgs, ok := dgsR.(string); ok {
-						return dgs, true
-					}
-				} else {
-					log.Warn("not found .config.digest")
-				}
-			} else {
-				log.Warn("unexpected type .config")
-			}
-		} else {
-			log.Warn("not found config in manifest")
-		}
-	} else {
-		log.Warn("unexpected raw type")
-	}
-	return "", false
-}
-
-func (m *ManifestResDto) LookupPlatform(marc, mos string) (string, bool) {
-	if mapv, ok := m.raw.(map[string]any); ok {
-		if manifestsRaw, ok := mapv["manifests"]; ok {
-			if manifests, ok := manifestsRaw.([]any); ok {
-				for i, mnR := range manifests {
-					var cmarc, cmos string
-					if mn, ok := mnR.(map[string]any); ok {
-						if plR, ok := mn["platform"]; ok {
-							if pl, ok := plR.(map[string]any); ok {
-								if marcR, ok := pl["architecture"]; ok {
-									if cmarc, ok = marcR.(string); !ok {
-										log.Warn("invalid type manifest.manifests[%d].platform.architecture, expected string", i)
-									}
-								} else {
-									log.Warn("missing manifest.manifests[%d].platform.architecture", i)
-								}
-								if mosR, ok := pl["os"]; ok {
-									if cmos, ok = mosR.(string); !ok {
-										log.Warn("invalid type manifest.manifests[%d].platform.os, expected string", i)
-									}
-								} else {
-									log.Warn("missing manifest.manifests[%d].platform.os", i)
-								}
-							} else {
-								log.Warn("invalid type manifest.manifests[%d].platform, expected map[any]", i)
-							}
-							if cmarc == marc && cmos == mos {
-								if digestR, ok := mn["digest"]; ok {
-									if digest, ok := digestR.(string); ok {
-										log.Debug("find manifest arc=%q os=%q digest=%q", marc, mos, digest)
-										return digest, true
-									} else {
-										log.Warn("invalid type manifest[%d].digest, expected string", i)
-									}
-								} else {
-									log.Warn("missing digest in manifests[%d]", i)
-								}
-							}
-						} else {
-							log.Warn("not found manifest.manifests[%d].platform", i)
-						}
-					} else {
-						log.Warn("unexpected type manifest.manifests[%d]", i)
-					}
-
-				}
-			} else {
-				log.Warn("unexpected type manifest.manifests[]")
-			}
-		} else {
-			log.Warn("manifests property not present")
-		}
-	} else {
-		log.Warn("unmatch type manifest")
-	}
-	return "", false
-}
-
-func (c *Client) Manifest(img *Image, digest string) (*ManifestResDto, error) {
-	var resB any
+func (c *Client) Manifest(img *Image, digest string) (*Manifest, error) {
 
 	if digest == "" {
 		log.Debug("digest is empty, tag=%q", img.Tag)
@@ -193,14 +60,27 @@ func (c *Client) Manifest(img *Image, digest string) (*ManifestResDto, error) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
-		if err := json.NewDecoder(res.Body).Decode(&resB); err != nil {
-			return nil, err
+		ct := res.Header.Get("content-type")
+		var mres any
+		if ct == IndexManifestContentType {
+			var m IndexManifest
+			if err := json.NewDecoder(res.Body).Decode(&m); err != nil {
+				return nil, err
+			}
+			mres = m
+		} else if ct == ImageManifestContentType {
+			var m ImageManifest
+			if err := json.NewDecoder(res.Body).Decode(&m); err != nil {
+				return nil, err
+			}
+			mres = m
+		} else {
+			return nil, fmt.Errorf("not supported content-type=%q", ct)
 		}
+		return &Manifest{mres}, nil
 	} else {
 		return nil, fmt.Errorf("unexpected status_code=%d", res.StatusCode)
 	}
-
-	return &ManifestResDto{resB}, nil
 }
 
 func (c *Client) Blob(img *Image, digest string) (io.ReadCloser, error) {
